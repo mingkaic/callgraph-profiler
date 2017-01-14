@@ -3,6 +3,11 @@
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
+#include <stack>
+
+#if HAS_CXX11_THREAD_LOCAL
+    #define TL_REINFORCE thread_local
+#endif
 
 extern "C" {
 
@@ -11,24 +16,69 @@ extern "C" {
 // conflict with existing symbol names in the examined programs.
 // e.g. CGPROF(entry) yields CaLlPrOfIlEr_entry
 #define CGPROF(X) CaLlPrOfIlEr_ ## X
-
-// shows up as global integer `CaLlPrOfIlEr_numFunctions`
-extern uint64_t CGPROF(numFunctions);
+// shows up as global integer `CaLlPrOfIlEr_numEdges`
+extern uint64_t CGPROF(numEdges);
 
 // shows up as struct `CaLlPrOfIlEr_functionInfo` with space (char*, uint64_t)
 extern struct {
 	char* caller;
 	char* callmodule;
-	uint64_t line;
+	uint32_t line;
 	char* callee;
 	uint64_t count;
 } CGPROF(functionInfo)[];
 
 
-// shows up as method `CaLlPrOfIlEr_called`
-void CGPROF(called)(uint64_t id) {
-	++CGPROF(functionInfo)[id].count;
+// shows up as method `CaLlPrOfIlEr_calling`
+void CGPROF(calling)(uint64_t id) {
+	if (id < CaLlPrOfIlEr_numEdges) {
+		++CGPROF(functionInfo)[id].count;
+	}
 }
+
+// internal stack
+struct inFunc
+{
+	uint64_t inId;
+	bool takeFunc;
+	inFunc(uint64_t id, bool take) : inId(id), takeFunc(take) {}
+};
+
+#ifdef TLS_REINFORCE
+	static TL_REINFORCE std::stack<inFunc> inEdge;
+#else
+	static std::stack<inFunc> inEdge;
+#endif
+
+
+// call stack push/peek approach (HIGHLY COUPLED)
+void CGPROF(funcPush)(uint64_t id) {
+	inEdge.push(inFunc(id, false));
+}
+
+
+void CGPROF(funcRangePush)(uint64_t id) {
+	inEdge.push(inFunc(id, true));
+}
+
+
+void CGPROF(funcPop)(uint64_t func_id) {
+	if (inEdge.empty())
+	{
+		// we've just started the program. no other internal nodes visited
+		return;
+	}
+	inFunc& ifunc = inEdge.top();
+	uint64_t idx = ifunc.inId;
+	if (ifunc.takeFunc)
+	{
+		idx += func_id;
+	}
+	CGPROF(calling)(idx);
+	inEdge.pop();
+}
+// end call stack approach
+
 
 // shows up as method `CaLlPrOfIlEr_print`
 void CGPROF(print)() {
@@ -36,7 +86,7 @@ void CGPROF(print)() {
 	std::ofstream results ("profile-results.csv", std::ofstream::out);
 
 	// for all functions record its info
-	for (size_t id = 0; id < CGPROF(numFunctions); ++id) {
+	for (size_t id = 0; id < CGPROF(numEdges); ++id) {
 		auto& info = CGPROF(functionInfo)[id];
 		if (info.count > 0) {
 			// format is <caller name>, <callsite filename>, <call site line #>, <callee name>, <frequency>

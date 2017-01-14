@@ -18,20 +18,18 @@ namespace cgprofiler {
 struct ProfilingInstrumentationPass : public llvm::ModulePass {
 	static char ID;
 
-	// uniquely and dynamically enumerate functions declarations
+	// uniquely and dynamically enumerate internally implemented functions
 	llvm::DenseMap<llvm::Function*, uint64_t> ids;
-	llvm::DenseSet<llvm::Function*> internal;
+	llvm::DenseSet<llvm::Function*> impls; // implemented internals
 
 	ProfilingInstrumentationPass()
 	: llvm::ModulePass(ID) {}
 
 	bool runOnModule(llvm::Module& m) override;
 
-	void handleCalledFunction(llvm::Function& f, llvm::Value* counter);
-	void handleInstruction(llvm::CallSite cs, llvm::Value* counter);
-
 private:
-	void populateIds (llvm::ArrayRef<llvm::Function*> functions);
+	void createEdgeTable(llvm::Module& m);
+
 	void populateInternals (llvm::ArrayRef<llvm::Function*> functions);
 };
 
