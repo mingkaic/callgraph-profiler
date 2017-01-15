@@ -6,10 +6,10 @@ test_path=${3-../c}
 
 for testfile in $test_path/*.c; do
     echo "Verifying test case $testfile"
-    bin_name=$(uuidgen)_calls
+    bin_name=calls
     $clang_path -g -c -emit-llvm $testfile -o calls.bc
     $bin_path calls.bc -o $bin_name > temphistory
-    # python calltester.py $bin_name $testfile
+    python calltester.py $bin_name $testfile
     rm $bin_name
     rm $bin_name.o
     rm $bin_name.callcounter.bc

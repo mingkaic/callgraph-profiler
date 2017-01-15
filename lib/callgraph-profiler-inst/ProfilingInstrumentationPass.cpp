@@ -1,4 +1,4 @@
-
+#include <iostream>
 
 #include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/CallSite.h"
@@ -46,6 +46,17 @@ static Constant* createConstantString(Module& m, StringRef str)
 }
 
 
+static Constant* getFilename(Module& m, Instruction& inst)
+{
+	const DebugLoc& loc = inst.getDebugLoc();
+	StringRef fname = m.getName();
+	if (loc) {
+		fname = loc->getFilename();
+	}
+	return createConstantString(m, fname);
+}
+
+
 static Constant* getLineNumber(LLVMContext& context, Instruction& inst)
 {
 	const DebugLoc& loc = inst.getDebugLoc();
@@ -55,6 +66,7 @@ static Constant* getLineNumber(LLVMContext& context, Instruction& inst)
 	}
 	return nullptr;
 }
+
 
 bool ProfilingInstrumentationPass::runOnModule(Module& m)
 {
@@ -106,7 +118,6 @@ bool ProfilingInstrumentationPass::runOnModule(Module& m)
     // from node is denoted by function name containing the function call
     // also ignore all llvm.dbg
 	std::vector<Constant*> edges;
-    Constant* filename = createConstantString(m, m.getName());
 	// We only want to instrument internally implemented functions, so we take impls instead.
 	for (auto funk : impls)
 	{
@@ -122,6 +133,7 @@ bool ProfilingInstrumentationPass::runOnModule(Module& m)
 					continue;
 				}
 				IRBuilder<> builder(cs.getInstruction());
+				Constant* filename = getFilename(m, stmt);
 				Constant* line = getLineNumber(context, stmt);
 				if (!line)
 				{
@@ -162,16 +174,20 @@ bool ProfilingInstrumentationPass::runOnModule(Module& m)
 			    }
 				else // call is a function pointer call
 				{
-					builder.CreateCall(callfrange, builder.getInt64(edges.size() + 1));
-
+					size_t currentIdx = edges.size();
+					builder.CreateCall(callfrange, builder.getInt64(currentIdx));
 					// callee can be any internal implementation!
-					for (llvm::Function* f : impls)
+					// callees must be ordered by id, so pad edges with impls nulls
+					edges.insert(edges.end(), ids.size(), nullptr);
+					for (auto imp : ids)
 					{
+						llvm::Function* f = imp.first;
+						uint64_t impid = imp.second;
 						callee = createConstantString(m, f->getName());
 						Constant *structFields[] = {
 							caller, filename, line, callee, zero
 						};
-						edges.push_back(ConstantStruct::get(structTy, structFields));
+						edges[currentIdx+impid] = ConstantStruct::get(structTy, structFields);
 					}
 				}
 			}

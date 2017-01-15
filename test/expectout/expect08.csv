@@ -1,9 +1,8 @@
-main, calls.bc, 15, dispatcher, 1
-main, calls.bc, 16, dispatcher, 1
-main, calls.bc, 17, dispatcher, 1
-main, calls.bc, 18, dispatcher, 1
-dispatcher, calls.bc, 11, a, 1
-dispatcher, calls.bc, 11, b, 1
-dispatcher, calls.bc, 11, c, 1
-dispatcher, calls.bc, 11, d, 1
-
+main, 08-function-pointer-multiple-internal-targets.c, 15, dispatcher, 1
+main, 08-function-pointer-multiple-internal-targets.c, 16, dispatcher, 1
+main, 08-function-pointer-multiple-internal-targets.c, 17, dispatcher, 1
+main, 08-function-pointer-multiple-internal-targets.c, 18, dispatcher, 1
+dispatcher, 08-function-pointer-multiple-internal-targets.c, 11, a, 1
+dispatcher, 08-function-pointer-multiple-internal-targets.c, 11, b, 1
+dispatcher, 08-function-pointer-multiple-internal-targets.c, 11, c, 1
+dispatcher, 08-function-pointer-multiple-internal-targets.c, 11, d, 1

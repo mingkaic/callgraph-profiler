@@ -19,4 +19,3 @@ main(int argc, char **argv) {
   a(argc);
   return 0;
 }
-

@@ -15,5 +15,3 @@ main(int argc, char **argv) {
   funptr(1);
   return 0;
 }
-
-

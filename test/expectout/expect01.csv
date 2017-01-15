@@ -1,2 +1,1 @@
-main, call.bc, 7, a, 1
-
+main, 01-internal-call-once.c, 7, a, 1

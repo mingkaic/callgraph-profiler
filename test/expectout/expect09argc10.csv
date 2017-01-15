@@ -1,3 +1,3 @@
-main, call.bc,19, a,1
-b, call.bc,13, a, 10
-a, call.bc,7, b, 11
+main, 09-internal-recursion.c,19, a,1
+b, 09-internal-recursion.c,13, a, 10
+a, 09-internal-recursion.c,7, b, 11
