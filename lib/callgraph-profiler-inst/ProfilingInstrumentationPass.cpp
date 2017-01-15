@@ -9,7 +9,6 @@
 
 #include "ProfilingInstrumentationPass.h"
 
-#include <iostream>
 using namespace llvm;
 using namespace cgprofiler;
 
@@ -126,22 +125,21 @@ bool ProfilingInstrumentationPass::runOnModule(Module& m)
 				Constant* line = getLineNumber(context, stmt);
 				if (!line)
 				{
-					//throw debugInfoNotFound();
-					line = ConstantInt::get(Type::getInt32Ty(context), 2000000); // delete once we move method injection out of edge identification phase
+					throw debugInfoNotFound();
 				}
 
 				// called is a direct call
 				auto directCall = dyn_cast<llvm::Function>(cs.getCalledValue()->stripPointerCasts());
-				StringRef callname = directCall->getName();
-				// ignore if callee is llvm.dbg.*
-				if (0 == std::string(callname.data()).compare(0, 9, "llvm.dbg."))
-				{
-					continue;
-				}
 
 				Constant* callee = nullptr;
 				if (directCall)
 				{
+					StringRef callname = directCall->getName();
+					// ignore if callee is llvm.dbg.*
+					if (0 == std::string(callname.data()).compare(0, 9, "llvm.dbg."))
+					{
+						continue;
+					}
 					callee = createConstantString(m, callname);
 				}
 
@@ -164,7 +162,6 @@ bool ProfilingInstrumentationPass::runOnModule(Module& m)
 			    }
 				else // call is a function pointer call
 				{
-					std::cout << "dealing with func pointer\n";
 					builder.CreateCall(callfrange, builder.getInt64(edges.size() + 1));
 
 					// callee can be any internal implementation!
@@ -176,7 +173,6 @@ bool ProfilingInstrumentationPass::runOnModule(Module& m)
 						};
 						edges.push_back(ConstantStruct::get(structTy, structFields));
 					}
-					std::cout << "dealt with func pointer\n";
 				}
 			}
 		}
@@ -184,8 +180,8 @@ bool ProfilingInstrumentationPass::runOnModule(Module& m)
 
 	for (auto funk : impls)
 	{
-		IRBuilder<> fbuilder(&*funk->getEntryBlock().getFirstInsertionPt());
-		fbuilder.CreateCall(enter, fbuilder.getInt64(ids[funk]));
+		IRBuilder<> builder(&*funk->getEntryBlock().getFirstInsertionPt());
+		builder.CreateCall(enter, builder.getInt64(ids[funk]));
 	}
 
 	auto* tableTy = ArrayType::get(structTy, edges.size());
