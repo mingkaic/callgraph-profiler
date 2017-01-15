@@ -1,0 +1,5 @@
+b, calls.bc, 6, a, 3
+main, file1.c, 0, b, 1
+main, file2.c, 0, b, 1
+main, file2.c, 65536, b, 1
+

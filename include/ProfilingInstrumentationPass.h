@@ -20,12 +20,13 @@ struct ProfilingInstrumentationPass : public llvm::ModulePass {
 
 	// uniquely and dynamically enumerate internally implemented functions
 	llvm::DenseMap<llvm::Function*, uint64_t> ids;
-	llvm::DenseSet<llvm::Function*> impls; // implemented internals
+	// set of internally implemented functions
+	llvm::DenseSet<llvm::Function*> impls;
 
 	ProfilingInstrumentationPass()
 	: llvm::ModulePass(ID) {}
 
-	bool runOnModule(llvm::Module& m) override;
+	bool runOnModule(llvm::Module& m) override; // instrumentation pass entrance
 
 private:
 	void createEdgeTable(llvm::Module& m);

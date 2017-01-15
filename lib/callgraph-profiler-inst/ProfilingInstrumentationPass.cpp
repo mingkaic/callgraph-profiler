@@ -9,13 +9,9 @@
 
 #include "ProfilingInstrumentationPass.h"
 
+#include <iostream>
 using namespace llvm;
 using namespace cgprofiler;
-
-
-struct debugInfoNotFound : std::exception {
-	const char* what() const noexcept { return "input file does not contain debug info necessary to analysize line info"; }
-};
 
 
 namespace cgprofiler
@@ -23,7 +19,14 @@ namespace cgprofiler
 
 char ProfilingInstrumentationPass::ID = 0;
 
-} // namespace cgprofiler
+
+struct debugInfoNotFound : std::exception
+{
+	const char* what() const noexcept
+	{
+		return "input file does not contain debug info necessary to analysize line info";
+	}
+};
 
 
 // helper function for creating a constant string accessible at runtime
@@ -48,24 +51,32 @@ static Constant* getLineNumber(LLVMContext& context, Instruction& inst)
 {
 	const DebugLoc& loc = inst.getDebugLoc();
 	if (loc) {
-		unsigned line = loc.getLine() + 1; // line numbers start from 1
+		unsigned line = loc.getLine(); // line numbers start from 1
 		return ConstantInt::get(Type::getInt32Ty(context), line);
 	}
 	return nullptr;
 }
 
-#include <iostream>
-// Create the CCOUNT(functionInfo) table used by the runtime library.
-// this table is simply an array of structures in the form {
-//		caller_func_name: string,
-//		caller_file_name: string,
-//		callsite_line: int32,
-//		callee_func_name: string,
-//		call_frequency: int64 (final value determined at runtime)
-//	}
-void ProfilingInstrumentationPass::createEdgeTable(Module& m)
+bool ProfilingInstrumentationPass::runOnModule(Module& m)
 {
 	auto& context = m.getContext();
+	// First identify the functions we wish to track
+	std::vector<llvm::Function*> toCount;
+	for (auto& f : m)
+	{
+		toCount.push_back(&f);
+	}
+
+	populateInternals(toCount);
+
+	// Create the CCOUNT(functionInfo) table used by the runtime library.
+	// this table is simply an array of structures in the form {
+	//		caller_func_name: string,
+	//		caller_file_name: string,
+	//		callsite_line: int32,
+	//		callee_func_name: string,
+	//		call_frequency: int64 (final value determined at runtime)
+	//	}
 
 	// Create the component types of the table
 	auto* voidTy = Type::getVoidTy(context);
@@ -97,20 +108,11 @@ void ProfilingInstrumentationPass::createEdgeTable(Module& m)
     // also ignore all llvm.dbg
 	std::vector<Constant*> edges;
     Constant* filename = createConstantString(m, m.getName());
-	for (auto& funk : m)
+	// We only want to instrument internally implemented functions, so we take impls instead.
+	for (auto funk : impls)
 	{
-		// We only want to instrument internally implemented functions.
-		// We only want to grab edges from internally implemented functions.
-		if (funk.isDeclaration())
-		{
-			continue;
-		}
-		// TODO: move method injection out of edge identifying (otherwise we'd count the injected functions too)
-		IRBuilder<> builder(&*funk.getEntryBlock().getFirstInsertionPt());
-		builder.CreateCall(enter, builder.getInt64(ids[&funk]));
-
-		Constant* caller = createConstantString(m, funk.getName());
-		for (auto& bb: funk)
+		Constant* caller = createConstantString(m, funk->getName());
+		for (auto& bb: *funk)
 		{
         	for (auto& stmt : bb)
 			{
@@ -121,7 +123,6 @@ void ProfilingInstrumentationPass::createEdgeTable(Module& m)
 					continue;
 				}
 				IRBuilder<> builder(cs.getInstruction());
-
 				Constant* line = getLineNumber(context, stmt);
 				if (!line)
 				{
@@ -163,7 +164,8 @@ void ProfilingInstrumentationPass::createEdgeTable(Module& m)
 			    }
 				else // call is a function pointer call
 				{
-					builder.CreateCall(callfrange, builder.getInt64(edges.size()+1));
+					std::cout << "dealing with func pointer\n";
+					builder.CreateCall(callfrange, builder.getInt64(edges.size() + 1));
 
 					// callee can be any internal implementation!
 					for (llvm::Function* f : impls)
@@ -174,10 +176,18 @@ void ProfilingInstrumentationPass::createEdgeTable(Module& m)
 						};
 						edges.push_back(ConstantStruct::get(structTy, structFields));
 					}
+					std::cout << "dealt with func pointer\n";
 				}
 			}
 		}
 	}
+
+	for (auto funk : impls)
+	{
+		IRBuilder<> fbuilder(&*funk->getEntryBlock().getFirstInsertionPt());
+		fbuilder.CreateCall(enter, fbuilder.getInt64(ids[funk]));
+	}
+
 	auto* tableTy = ArrayType::get(structTy, edges.size());
 	auto* functionTable = ConstantArray::get(tableTy, edges);
 	new GlobalVariable(m,
@@ -194,27 +204,9 @@ void ProfilingInstrumentationPass::createEdgeTable(Module& m)
         GlobalValue::ExternalLinkage,
         numEdgesGlobal,
         "CaLlPrOfIlEr_numEdges");
-}
-
-
-bool ProfilingInstrumentationPass::runOnModule(Module& m)
-{
-	auto& context = m.getContext();
-	// First identify the functions we wish to track
-	std::vector<llvm::Function*> toCount;
-	for (auto& f : m)
-	{
-		toCount.push_back(&f);
-	}
-
-	populateInternals(toCount);
-
-	// next line and block are highly coupled
-	createEdgeTable(m);
 
 	// inject the result printing function so that it prints out the counts after
 	// the entire program is finished executing.
-	auto* voidTy = Type::getVoidTy(context);
 	auto* printer = m.getOrInsertFunction("CaLlPrOfIlEr_print", voidTy, nullptr);
 	appendToGlobalDtors(m, cast<llvm::Function>(printer), 0);
 
@@ -235,3 +227,5 @@ void ProfilingInstrumentationPass::populateInternals (ArrayRef<llvm::Function*> 
 		}
 	}
 }
+
+} // namespace cgprofiler

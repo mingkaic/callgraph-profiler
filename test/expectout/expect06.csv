@@ -1,0 +1,5 @@
+a, calls.bc, 4, printf, 3
+main, calls.bc, 9, a, 1
+main, calls.bc, 10, a, 1
+main, calls.bc, 11, a, 1
+
