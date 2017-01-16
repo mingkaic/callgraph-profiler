@@ -4,7 +4,6 @@
 #include "llvm/IR/CallSite.h"
 #include "llvm/IR/DebugInfo.h"
 #include "llvm/IR/DerivedTypes.h"
-#include "llvm/IR/IRBuilder.h"
 #include "llvm/Transforms/Utils/ModuleUtils.h"
 
 #include "ProfilingInstrumentationPass.h"
@@ -25,6 +24,14 @@ struct debugInfoNotFound : std::exception
 	{
 		return "input file does not contain debug info necessary to analysize line info";
 	}
+};
+
+
+enum CALLCASE
+{
+	EXTERNAL = 0,
+	DIRECT,
+	FUNCPTR
 };
 
 
@@ -57,8 +64,9 @@ static Constant* getFilename(Module& m, Instruction& inst)
 }
 
 
-static Constant* getLineNumber(LLVMContext& context, Instruction& inst)
+static Constant* getLineNumber(Module& m, Instruction& inst)
 {
+	auto& context = m.getContext();
 	const DebugLoc& loc = inst.getDebugLoc();
 	if (loc) {
 		unsigned line = loc.getLine(); // line numbers start from 1
@@ -71,44 +79,23 @@ static Constant* getLineNumber(LLVMContext& context, Instruction& inst)
 bool ProfilingInstrumentationPass::runOnModule(Module& m)
 {
 	auto& context = m.getContext();
-	// First identify the functions we wish to track
-	std::vector<llvm::Function*> toCount;
-	for (auto& f : m)
-	{
-		toCount.push_back(&f);
-	}
-
-	populateInternals(toCount);
-
-	// Create the CCOUNT(functionInfo) table used by the runtime library.
-	// this table is simply an array of structures in the form {
-	//		caller_func_name: string,
-	//		caller_file_name: string,
-	//		callsite_line: int32,
-	//		callee_func_name: string,
-	//		call_frequency: int64 (final value determined at runtime)
-	//	}
+	initInternals(m);
 
 	// Create the component types of the table
 	auto* voidTy = Type::getVoidTy(context);
-	auto* int32Ty = Type::getInt32Ty(context);
 	auto* int64Ty = Type::getInt64Ty(context);
 	auto* stringTy = Type::getInt8PtrTy(context);
-	Type* fieldTys[] = {stringTy, stringTy, int32Ty, stringTy, int64Ty};
+	Type* fieldTys[] = {stringTy, stringTy, Type::getInt32Ty(context), stringTy, int64Ty};
 	auto* structTy = StructType::get(context, fieldTys, false);
+
+	auto* intSetterTy = FunctionType::get(voidTy, int64Ty, false);
+	// increment CaLlPrOfIlEr_edgeInfo[input] frequency
+	auto externalCall = m.getOrInsertFunction("CaLlPrOfIlEr_calling", intSetterTy);
+	// push edgeInfo index into runtime call stack
+	auto directCall = m.getOrInsertFunction("CaLlPrOfIlEr_funcPush", intSetterTy);
+	auto ptrCall = m.getOrInsertFunction("CaLlPrOfIlEr_funcRangePush", intSetterTy);
 	// initial value of call frequency
 	auto* zero = ConstantInt::get(int64Ty, 0, false);
-
-	// Declare the counter function
-	auto* intSetterTy = FunctionType::get(voidTy, int64Ty, false);
-	// call upon calling an external function
-	auto* counter = m.getOrInsertFunction("CaLlPrOfIlEr_calling", intSetterTy);
-	// call upon calling an internal function (pointer and direct)
-	auto* callf = m.getOrInsertFunction("CaLlPrOfIlEr_funcPush", intSetterTy); // when peeking return pushed index
-	// call upon calling an internal function (pointer and direct)
-	auto* callfrange = m.getOrInsertFunction("CaLlPrOfIlEr_funcRangePush", intSetterTy); // exactly same as callf, except when peeking return input function index + pushed index
-	// call upon entering an internal function
-	auto* enter = m.getOrInsertFunction("CaLlPrOfIlEr_funcPop", intSetterTy); // return last pushed index on call stack
 
     // identify and record all function calls within modules into edges
     // to node is denoted by callee, and it is the name of the calling statement (unless it's a function pointer)
@@ -119,85 +106,62 @@ bool ProfilingInstrumentationPass::runOnModule(Module& m)
     // also ignore all llvm.dbg
 	std::vector<Constant*> edges;
 	// We only want to instrument internally implemented functions, so we take impls instead.
-	for (auto funk : impls)
+	for (auto f_imps : impls)
 	{
+		llvm::Function* funk = f_imps.first;
 		Constant* caller = createConstantString(m, funk->getName());
 		for (auto& bb: *funk)
 		{
         	for (auto& stmt : bb)
 			{
-				CallSite cs(&stmt);
-				// Check whether the instruction is actually a function call
-				if (!cs.getInstruction())
-				{
-					continue;
-				}
-				IRBuilder<> builder(cs.getInstruction());
-				Constant* filename = getFilename(m, stmt);
-				Constant* line = getLineNumber(context, stmt);
-				if (!line)
-				{
-					throw debugInfoNotFound();
-				}
-
-				// called is a direct call
-				auto directCall = dyn_cast<llvm::Function>(cs.getCalledValue()->stripPointerCasts());
-
-				Constant* callee = nullptr;
-				if (directCall)
-				{
-					StringRef callname = directCall->getName();
-					// ignore if callee is llvm.dbg.*
-					if (0 == std::string(callname.data()).compare(0, 9, "llvm.dbg."))
-					{
-						continue;
-					}
-					callee = createConstantString(m, callname);
-				}
-
-				if (callee)
-				{
-					// implemented functions are counted upon the entry of each function body.
-					if (!impls.count(directCall))
-					{
-						// so only count external functions at their callsite
-						builder.CreateCall(counter, builder.getInt64(edges.size()));
-					}
-					else
-					{
-						builder.CreateCall(callf, builder.getInt64(edges.size()));
-					}
-					Constant *structFields[] = {
-						caller, filename, line, callee, zero
-					};
-					edges.push_back(ConstantStruct::get(structTy, structFields));
-			    }
-				else // call is a function pointer call
+				std::vector<StringRef> callees = handleCallees(CallSite(&stmt),
+					[&edges, externalCall, directCall, ptrCall]
+					(IRBuilder<>& builder, size_t callcase)
 				{
 					size_t currentIdx = edges.size();
-					builder.CreateCall(callfrange, builder.getInt64(currentIdx));
-					// callee can be any internal implementation!
-					// callees must be ordered by id, so pad edges with impls nulls
-					edges.insert(edges.end(), ids.size(), nullptr);
-					for (auto imp : ids)
+					switch(callcase)
 					{
-						llvm::Function* f = imp.first;
-						uint64_t impid = imp.second;
-						callee = createConstantString(m, f->getName());
+						case EXTERNAL:
+							builder.CreateCall(externalCall, builder.getInt64(currentIdx));
+							break;
+						case DIRECT:
+							builder.CreateCall(directCall, builder.getInt64(currentIdx));
+							break;
+						case FUNCPTR:
+							builder.CreateCall(ptrCall, builder.getInt64(currentIdx));
+							break;
+					}
+				});
+				// callee is empty is stmt isn't a call or an edge we should record
+				if (!callees.empty())
+				{
+					Constant* filename = getFilename(m, stmt);
+					Constant* line = getLineNumber(m, stmt);
+					if (!line)
+					{
+						throw debugInfoNotFound();
+					}
+					for (StringRef callname : callees)
+					{
+						Constant* callee = createConstantString(m, callname);
 						Constant *structFields[] = {
 							caller, filename, line, callee, zero
 						};
-						edges[currentIdx+impid] = ConstantStruct::get(structTy, structFields);
+						edges.push_back(ConstantStruct::get(structTy, structFields));
 					}
 				}
 			}
 		}
 	}
 
-	for (auto funk : impls)
+	auto popCallStack = m.getOrInsertFunction("CaLlPrOfIlEr_funcPop",
+		FunctionType::get(voidTy, int64Ty, false));
+	for (auto f_imps : impls)
 	{
+		llvm::Function* funk = f_imps.first;
 		IRBuilder<> builder(&*funk->getEntryBlock().getFirstInsertionPt());
-		builder.CreateCall(enter, builder.getInt64(ids[funk]));
+		// pop edgeInfo index from call stack, adding id to index iff the edgeInfo index is pushed from callfrange
+		builder.CreateCall(popCallStack, builder.getInt64(impls[funk]));
 	}
 
 	auto* tableTy = ArrayType::get(structTy, edges.size());
@@ -207,7 +171,7 @@ bool ProfilingInstrumentationPass::runOnModule(Module& m)
         false,
         GlobalValue::ExternalLinkage,
         functionTable,
-        "CaLlPrOfIlEr_functionInfo");
+        "CaLlPrOfIlEr_edgeInfo");
 
 	auto* numEdgesGlobal = ConstantInt::get(int64Ty, edges.size(), false);
 	new GlobalVariable(m,
@@ -226,15 +190,65 @@ bool ProfilingInstrumentationPass::runOnModule(Module& m)
 }
 
 
-void ProfilingInstrumentationPass::populateInternals (ArrayRef<llvm::Function*> functions)
+std::vector<StringRef> ProfilingInstrumentationPass::handleCallees (CallSite cs,
+	std::function<void(IRBuilder<>&, size_t)> injectCall)
+{
+	// Check whether the instruction is actually a function call
+	if (!cs.getInstruction())
+	{
+		return std::vector<StringRef>();
+	}
+
+	IRBuilder<> builder(cs.getInstruction());
+	std::vector<StringRef> callees;
+	auto directCall = dyn_cast<llvm::Function>(cs.getCalledValue()->stripPointerCasts());
+	// for all injected function calls, argument is the starting index of the edge info being inserted
+	if (directCall)
+	{
+		// store callee name
+		StringRef callname = directCall->getName();
+		// ignore llvm.dbg.*
+		if (0 == std::string(callname.data()).compare(0, 9, "llvm.dbg."))
+			return std::vector<StringRef>();
+
+		callees.push_back(callname);
+
+		// inject function calls
+		if (!impls.count(directCall)) // external function calls
+		{
+			injectCall(builder, EXTERNAL);
+		}
+		else // internal function calls
+		{
+			injectCall(builder, DIRECT);
+		}
+	}
+	else // call is a function pointer call
+	{
+		// callees must be internally implemented functions ordered by id, so pad with nulls
+		// then inject info in the correct id order
+		callees.insert(callees.end(), impls.size(), StringRef());
+		for (auto imp : impls)
+		{
+			llvm::Function* f = imp.first;
+			uint64_t id = imp.second;
+			callees[id] = f->getName();
+		}
+		// inject function calls
+		injectCall(builder, FUNCPTR);
+	}
+	return callees;
+}
+
+
+void ProfilingInstrumentationPass::initInternals (Module& m)
 {
 	size_t nextID = 0;
-	for (auto f : functions)
+	for (auto& f : m)
 	{
-		if (!f->isDeclaration())
+		if (!f.isDeclaration())
 		{
-			impls.insert(f);
-			ids[f] = nextID;
+			impls[&f] = nextID;
 			++nextID;
 		}
 	}

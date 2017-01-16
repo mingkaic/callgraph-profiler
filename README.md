@@ -53,3 +53,24 @@ as follows:
 
     <caller function name>, <call site file name>, <call site line #>, <callee function name>, <(call site,callee) frequency>
 
+Unit Testing
+==============================================
+
+After callgraph-profiler binary is built
+Running `test/unit/testall.sh` on linux-base systems performs the following:
+
+1. convert every file in the specified test directory (defaults to test/c) to bitcode
+
+2. instrument bitcode for profiling and link with runtime library to generate call binary
+
+3. run python test script `calltester.py` which accepts the arguments <call binary name> <path to original testfile>
+
+`testall.sh` accepts the arguments:
+
+- <clang path (defaults to clang in global variable path or /usr/bin)>
+
+- <binary path (defaults to callgraph-profiler/build/bin/callgraph-profiler)>
+
+- <test path (defaults to callgraph-profiler/test/c)>
+
+`calltester.py` can be modified by adding testfiles to targ which maps testfile names to a list of (test arguments, expected csv file)

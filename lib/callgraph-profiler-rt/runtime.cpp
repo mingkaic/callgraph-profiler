@@ -19,22 +19,23 @@ extern "C" {
 // shows up as global integer `CaLlPrOfIlEr_numEdges`
 extern uint64_t CGPROF(numEdges);
 
-// shows up as struct `CaLlPrOfIlEr_functionInfo` with space (char*, uint64_t)
+// shows up as struct array `CaLlPrOfIlEr_edgeInfo` with space (char*, uint64_t)
 extern struct {
 	char* caller;
 	char* callmodule;
 	uint32_t line;
 	char* callee;
 	uint64_t count;
-} CGPROF(functionInfo)[];
+} CGPROF(edgeInfo)[];
 
 
 // shows up as method `CaLlPrOfIlEr_calling`
 void CGPROF(calling)(uint64_t id) {
 	if (id < CaLlPrOfIlEr_numEdges) {
-		++CGPROF(functionInfo)[id].count;
+		++CGPROF(edgeInfo)[id].count;
 	}
 }
+
 
 // internal stack
 struct inFunc
@@ -43,6 +44,7 @@ struct inFunc
 	bool takeFunc;
 	inFunc(uint64_t id, bool take) : inId(id), takeFunc(take) {}
 };
+
 
 #ifdef TLS_REINFORCE
 	static TL_REINFORCE std::stack<inFunc> inEdge;
@@ -87,7 +89,7 @@ void CGPROF(print)() {
 
 	// for all functions record its info
 	for (size_t id = 0; id < CGPROF(numEdges); ++id) {
-		auto& info = CGPROF(functionInfo)[id];
+		auto& info = CGPROF(edgeInfo)[id];
 		if (info.count > 0) {
 			// format is <caller name>, <callsite filename>, <call site line #>, <callee name>, <frequency>
 			results << info.caller << ", "
