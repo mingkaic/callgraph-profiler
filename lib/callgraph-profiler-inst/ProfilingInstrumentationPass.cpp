@@ -94,6 +94,21 @@ bool ProfilingInstrumentationPass::runOnModule(Module& m)
 	// push edgeInfo index into runtime call stack
 	auto directCall = m.getOrInsertFunction("CaLlPrOfIlEr_funcPush", intSetterTy);
 	auto ptrCall = m.getOrInsertFunction("CaLlPrOfIlEr_funcRangePush", intSetterTy);
+
+	// Global variables
+	auto* tableTy = ArrayType::get(structTy, edges.size());
+	auto* functionTable = ConstantArray::get(tableTy, edges);
+	new GlobalVariable(m,
+        tableTy, false,
+        GlobalValue::ExternalLinkage,
+        functionTable, "CaLlPrOfIlEr_edgeInfo");
+
+	auto* numEdgesGlobal = ConstantInt::get(int64Ty, edges.size(), false);
+	new GlobalVariable(m,
+        int64Ty, true,
+        GlobalValue::ExternalLinkage,
+        numEdgesGlobal, "CaLlPrOfIlEr_numEdges");
+
 	// initial value of call frequency
 	auto* zero = ConstantInt::get(int64Ty, 0, false);
 
@@ -163,23 +178,6 @@ bool ProfilingInstrumentationPass::runOnModule(Module& m)
 		// pop edgeInfo index from call stack, adding id to index iff the edgeInfo index is pushed from callfrange
 		builder.CreateCall(popCallStack, builder.getInt64(impls[funk]));
 	}
-
-	auto* tableTy = ArrayType::get(structTy, edges.size());
-	auto* functionTable = ConstantArray::get(tableTy, edges);
-	new GlobalVariable(m,
-        tableTy,
-        false,
-        GlobalValue::ExternalLinkage,
-        functionTable,
-        "CaLlPrOfIlEr_edgeInfo");
-
-	auto* numEdgesGlobal = ConstantInt::get(int64Ty, edges.size(), false);
-	new GlobalVariable(m,
-        int64Ty,
-        true,
-        GlobalValue::ExternalLinkage,
-        numEdgesGlobal,
-        "CaLlPrOfIlEr_numEdges");
 
 	// inject the result printing function so that it prints out the counts after
 	// the entire program is finished executing.

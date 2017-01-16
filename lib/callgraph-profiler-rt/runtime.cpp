@@ -19,7 +19,7 @@ extern "C" {
 // shows up as global integer `CaLlPrOfIlEr_numEdges`
 extern uint64_t CGPROF(numEdges);
 
-// shows up as struct array `CaLlPrOfIlEr_edgeInfo` with space (char*, uint64_t)
+// shows up as table `CaLlPrOfIlEr_edgeInfo` with space (char*, uint64_t)
 extern struct {
 	char* caller;
 	char* callmodule;
