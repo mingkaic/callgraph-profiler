@@ -95,20 +95,6 @@ bool ProfilingInstrumentationPass::runOnModule(Module& m)
 	auto directCall = m.getOrInsertFunction("CaLlPrOfIlEr_funcPush", intSetterTy);
 	auto ptrCall = m.getOrInsertFunction("CaLlPrOfIlEr_funcRangePush", intSetterTy);
 
-	// Global variables
-	auto* tableTy = ArrayType::get(structTy, edges.size());
-	auto* functionTable = ConstantArray::get(tableTy, edges);
-	new GlobalVariable(m,
-        tableTy, false,
-        GlobalValue::ExternalLinkage,
-        functionTable, "CaLlPrOfIlEr_edgeInfo");
-
-	auto* numEdgesGlobal = ConstantInt::get(int64Ty, edges.size(), false);
-	new GlobalVariable(m,
-        int64Ty, true,
-        GlobalValue::ExternalLinkage,
-        numEdgesGlobal, "CaLlPrOfIlEr_numEdges");
-
 	// initial value of call frequency
 	auto* zero = ConstantInt::get(int64Ty, 0, false);
 
@@ -183,6 +169,20 @@ bool ProfilingInstrumentationPass::runOnModule(Module& m)
 	// the entire program is finished executing.
 	auto* printer = m.getOrInsertFunction("CaLlPrOfIlEr_print", voidTy, nullptr);
 	appendToGlobalDtors(m, cast<llvm::Function>(printer), 0);
+
+	// Global variables
+	auto* tableTy = ArrayType::get(structTy, edges.size());
+	auto* functionTable = ConstantArray::get(tableTy, edges);
+	new GlobalVariable(m,
+        tableTy, false,
+        GlobalValue::ExternalLinkage,
+        functionTable, "CaLlPrOfIlEr_edgeInfo");
+
+	auto* numEdgesGlobal = ConstantInt::get(int64Ty, edges.size(), false);
+	new GlobalVariable(m,
+        int64Ty, true,
+        GlobalValue::ExternalLinkage,
+        numEdgesGlobal, "CaLlPrOfIlEr_numEdges");
 
 	return true;
 }
