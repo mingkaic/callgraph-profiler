@@ -4,3 +4,6 @@
 **/calls.callcounter.bc
 **/calls.o
 **/profile-results.csv
+cmake-build-debug
+.idea/
+**/*.ll
